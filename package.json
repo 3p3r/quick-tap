@@ -1,0 +1,24 @@
+{
+  "name": "quick-tap",
+  "version": "1.0.0",
+  "description": "User-land NodeJS and TAP compatible test harness. Implements Node's API.",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx tsx test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3p3r/quick-tap.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/3p3r/quick-tap/issues"
+  },
+  "homepage": "https://github.com/3p3r/quick-tap#readme",
+  "devDependencies": {
+    "@types/node": "^18.11.18",
+    "tsx": "^3.12.2"
+  }
+}

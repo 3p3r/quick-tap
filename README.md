@@ -15,9 +15,8 @@ Quick-Tap defers from Node's testing module in the following ways:
 - The whole harness runs in the same process and does not do any process forking
 - There's no test runner, you simply run the test file directly by executing it
 - Mocking and Assertions are not included. You can use Sinon and Chai for that
-- If the test function receives a callback function and also returns a Promise,
-  the test __will not fail__. Except, it will fail iff the callback receives any
-  truthy value as its first argument __or__ if the Promise rejects.
+- There is no concurrency option. Tests are run asynchronously.
+- `AbortSignal` is not available. Use `test.bailout()` instead.
 
 By default the library writes to `stdout` with `console.log` calls, but you can
 override this behavior by passing a custom `reporter` function where applicable.

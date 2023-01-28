@@ -27,19 +27,11 @@ export enum Status {
 	Ok,
 	NotOk,
 }
-export interface TestPointInitializer {
-	readonly fn?: Fn;
-	readonly name?: string;
-	readonly scope?: TestPoint;
-	readonly directive?: Directive;
-}
-export namespace TestPointInitializer {
-	export const Default: TestPointInitializer = {
-		fn: () => {},
-		name: "<anonymous>",
-		scope: undefined,
-		directive: undefined,
-	};
+enum Block {
+	It,
+	Test,
+	Describe,
+	Default,
 }
 export interface TestPlanConfiguration {
 	readonly timeout?: number;
@@ -54,6 +46,13 @@ export namespace TestPlanConfiguration {
 		todo: false,
 		only: false,
 	};
+}
+export interface TestPointInitializer extends TestPlanConfiguration {
+	readonly fn?: Fn;
+	readonly name?: string;
+	readonly block: Block;
+	readonly scope?: TestPoint;
+	readonly directive?: Directive;
 }
 export interface TestRunConfiguration {
 	readonly timeout?: number;
@@ -84,28 +83,32 @@ const TEST = Symbol("QuickTap/TestPoint/test");
 const DESCRIBE = Symbol("QuickTap/TestPoint/describe");
 
 export class TestPoint implements Hookable {
-	private readonly _name: string;
+	public readonly name: string;
 	private readonly _scope?: TestPoint;
 	private readonly _subtests = new Set<TestPoint>();
 	private readonly _fn: Fn;
-	private _only: boolean;
-	private _skip: boolean;
-	private _todo: boolean;
+	private _only?: boolean;
+	private _skip?: boolean | string;
+	private _todo?: boolean | string;
+	private _block: Block;
 	private _directive?: Directive;
 	private _status?: Status;
 	private readonly reporter: (statement: string) => void;
-	private readonly indent = this._scope ? this._scope.indent + formalize.Indentation : formalize.EmptyString;
-	constructor(
-		{ name = "<anonymous>", fn = () => {}, directive, scope }: TestPointInitializer = TestPointInitializer.Default,
-		reporter?: (statement: string) => void,
-	) {
+	private readonly indent: string;
+	constructor(init: TestPointInitializer, reporter?: (statement: string) => void) {
 		this.reporter = reporter || console.log;
-		this._scope = scope;
-		this._name = name;
-		this._directive = directive;
-		this._fn = fn;
+		this._scope = init.scope;
+		this.name = init.name || "<anonymous>";
+		this._fn = init.fn || (() => {});
+		this._only = init.only;
+		this._skip = init.skip;
+		this._todo = init.todo;
+		this._block = init.block;
+		this._directive = init.directive;
+		this.isRoot = this._scope === undefined;
+		this.indent = this._scope ? this._scope.indent + formalize.Indentation : formalize.EmptyString;
 	}
-	public readonly isRoot = this._scope === undefined;
+	public readonly isRoot: boolean;
 	public beforeEach(fn: Hook, options?: HookOptions) {}
 	public afterEach(fn: Hook, options?: HookOptions) {}
 	public before(fn: Hook, options?: HookOptions) {}
@@ -119,22 +122,59 @@ export class TestPoint implements Hookable {
 		if (this.isRoot) {
 			this.reporter("TAP version 14");
 		}
-		this.reporter(`1..${this._subtests.size}`);
-		await Promise.all([...this._subtests].map((test) => test.run()));
+		this._status = Status.Ok;
+		try {
+			if (this._block === Block.Describe) await (this._fn as Describe)({ name: this.name });
+			if (this._block === Block.It) {
+				if (this._fn.length > 0) {
+					ッ(false, "done route not implemented yet");
+				} else {
+					await (this._fn as It)();
+				}
+			}
+			if (this._block === Block.Test) {
+				if (this._fn.length > 1) {
+					ッ(false, "done route not implemented yet");
+				} else {
+					await (this._fn as Test)(this);
+				}
+			}
+		} catch (err) {
+			this._status = Status.NotOk;
+		}
+		// while fn() runs, it asserts and adds subtests
+		// here assertions are done and also the subtests are run
+		// we should make sure subtests do not last longer than the parent test
+		// we should make sure subtests do not run if the parent test is skipped
+		// we should make sure subtests do not run if the parent test is todo
+
+		// leaf plan don't report anything, they just run
+		if (this._subtests.size === 0) return;
+		this.reporter(`${this.indent}1..${this._subtests.size}`);
+		this._report();
+		for (const test of this._subtests) {
+			test._report();
+		}
+	}
+	private _report() {
+		ッ(this._status !== undefined, "test must run first");
+		this.reporter(`${this.indent}${this._status === Status.Ok ? "ok" : "not ok"} - ${this.name}`);
 	}
 	public readonly it: PlanTestWithDirective<It> = _it.bind(this);
 	public readonly test: PlanTestWithDirective<Test> = _it.bind(this);
 	public readonly describe: PlanTestWithDirective<Describe> = _describe.bind(this);
 	async [DESCRIBE](name: string, options: TestPlanConfiguration, fn: Describe) {
-		const test = new TestPoint({ name, fn, scope: this }, this.reporter);
+		const test = new TestPoint({ name, fn, scope: this, ...options, block: Block.Describe }, this.reporter);
 		this._subtests.add(test);
+		await test.run();
 	}
 	async [IT](name: string, options: TestPlanConfiguration, fn: It) {
-		const test = new TestPoint({ name, fn, scope: this }, this.reporter);
+		const test = new TestPoint({ name, fn, scope: this, ...options, block: Block.Test }, this.reporter);
 		this._subtests.add(test);
+		await test.run();
 	}
 	async [TEST](name: string, options: TestPlanConfiguration, fn: Test) {
-		const test = new TestPoint({ name, fn, scope: this }, this.reporter);
+		const test = new TestPoint({ name, fn, scope: this, ...options, block: Block.It }, this.reporter);
 		this._subtests.add(test);
 		await test.run();
 	}
@@ -147,7 +187,7 @@ export class TestPoint implements Hookable {
 	public toJSON() {
 		ッ(this._status, "Cannot serialize a test point that has not been ran yet.");
 		return {
-			name: this._name,
+			name: this.name,
 			directive: this._directive,
 		};
 	}
@@ -192,7 +232,7 @@ _test.todo = async function (this: TestPoint, name: string, options: TestPlanCon
 	await this[TEST](name, { ...options, todo: true }, fn);
 };
 
-const root = new TestPoint();
+const root = new TestPoint({ block: Block.Default });
 export const run = root.run;
 export const describe = root.describe;
 export const test = root.test;
@@ -210,14 +250,9 @@ export interface Test {
 }
 export interface SuiteContext {
 	readonly name: string;
-	readonly signal: AbortSignal;
 }
-export interface TestContext extends TestPoint {
-	readonly name: string;
-	readonly signal: AbortSignal;
-}
+export interface TestContext extends TestPoint {}
 export type Hook = (context: TestContext) => any;
 export interface HookOptions {
 	readonly timeout?: number;
-	readonly signal?: AbortSignal;
 }
